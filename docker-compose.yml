@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+  osrs.sh:
+    build:
+      context: .
+    ports:
+      - 8080:8080
+      - 5250:5250
+    hostname: osrs
+    env_file: .env
+    tty: true
+    volumes:
+      - .:/usr/app
