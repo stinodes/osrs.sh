@@ -4,7 +4,7 @@
 
 ...Over SSH
 
-[Demo](./demo.gif)
+![Demo](./demo.gif)
 
 ## Get started
 
