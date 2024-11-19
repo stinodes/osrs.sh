@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
 )
 
 type WikiTokenType int
@@ -15,6 +14,7 @@ const (
 	LinkToken
 	BoldToken
 	FileToken
+	RedirectToken
 )
 
 type DefaultToken struct {
@@ -47,12 +47,14 @@ func newTokenForType(tokenType WikiTokenType) func(text []string) DefaultToken {
 		}
 	}
 }
-func newFileToken(text []string) DefaultToken {
-	return DefaultToken{
-		tokenType: FileToken,
-		text:      text[0],
-		content:   "",
-		target:    "",
+func newHiddenTokenForType(tokenType WikiTokenType) func(text []string) DefaultToken {
+	return func(text []string) DefaultToken {
+		return DefaultToken{
+			tokenType: tokenType,
+			text:      text[0],
+			content:   "",
+			target:    "",
+		}
 	}
 }
 func newLinkToken(text []string) DefaultToken {
@@ -80,10 +82,11 @@ func NewParser(text string, styles map[WikiTokenType]*lipgloss.Style) Parser {
 		text:   text,
 		styles: styles,
 		regex: map[WikiTokenType]*regexp.Regexp{
-			TitleToken: regexp.MustCompile(`==+([a-zA-Z ]+)==+`),
-			LinkToken:  regexp.MustCompile(`\[{2}(?:([\w'\- ]+)\|)?([\w'\- ]+)\]{2}`),
-			BoldToken:  regexp.MustCompile(`'''([a-zA-Z ]+)'''`),
-			FileToken:  regexp.MustCompile(`\(?\[{2}File:[a-zA-Z ]+\.[a-z]{3}(?:\|[a-zA-Z ]+)*\]{2}\)?`),
+			TitleToken:    regexp.MustCompile(`==+([a-zA-Z ]+)==+`),
+			LinkToken:     regexp.MustCompile(`\[{2}(?:([\w'\- \(\)#]+)\|)?([\w'\- \(\)]+)\]{2}`),
+			BoldToken:     regexp.MustCompile(`'''([a-zA-Z ]+)'''`),
+			FileToken:     regexp.MustCompile(`\(?\[{2}File:[a-zA-Z ]+\.[a-z]{3}(?:\|[a-zA-Z ]+)*\]{2}\)?`),
+			RedirectToken: regexp.MustCompile(`\{\{redirect\|[\w'\-\| \(\)]+\}\}`),
 		},
 		tokens: []DefaultToken{},
 	}
@@ -108,8 +111,8 @@ func (p *Parser) Parse() {
 		switch tokenType {
 		case LinkToken:
 			fn = newLinkToken
-		case FileToken:
-			fn = newFileToken
+		case FileToken, RedirectToken:
+			fn = newHiddenTokenForType(tokenType)
 		default:
 			fn = newTokenForType(tokenType)
 		}
@@ -120,7 +123,6 @@ func (p *Parser) Parse() {
 }
 func (p *Parser) Format() string {
 	text := p.text
-	log.Info("Tokens", "n", len(p.tokens))
 	for _, token := range p.tokens {
 		content := token.Content()
 		if p.styles[token.TokenType()] != nil {
