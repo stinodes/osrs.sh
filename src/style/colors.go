@@ -10,6 +10,8 @@ import "github.com/charmbracelet/lipgloss"
 // OSRS Dark theme
 var PrimaryForeground = lipgloss.AdaptiveColor{Light: "#5d6773", Dark: "#f4eaea"}
 var DimmedForeground = lipgloss.AdaptiveColor{Light: "#5d6773", Dark: "#a4a1a1"}
+var SubtleForeground = lipgloss.AdaptiveColor{Light: "#5d6773", Dark: "#3e362f"}
 var AccentForeground = lipgloss.AdaptiveColor{Light: "#5d6773", Dark: "#ea4727"}
 var LinkForeground = lipgloss.AdaptiveColor{Light: "#5d6773", Dark: "#b79d7e"}
 var BorderForeground = lipgloss.AdaptiveColor{Light: "#5d6773", Dark: "#b79d7e"}
+var SelectedBackground = lipgloss.AdaptiveColor{Light: "#5d6773", Dark: "#ea4727"}

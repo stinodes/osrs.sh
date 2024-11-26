@@ -1,10 +1,13 @@
 package wiki
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/log"
 )
 
 type WikiTokenType int
@@ -22,6 +25,7 @@ type DefaultToken struct {
 	text      string
 	content   string
 	target    string
+	id        int
 }
 
 func (t DefaultToken) TokenType() WikiTokenType {
@@ -36,54 +40,31 @@ func (t DefaultToken) Content() string {
 func (t DefaultToken) Target() string {
 	return t.target
 }
-
-func newTokenForType(tokenType WikiTokenType) func(text []string) DefaultToken {
-	return func(text []string) DefaultToken {
-		return DefaultToken{
-			tokenType: tokenType,
-			text:      text[0],
-			content:   text[1],
-			target:    "",
-		}
-	}
+func (t DefaultToken) Id() int {
+	return t.id
 }
-func newHiddenTokenForType(tokenType WikiTokenType) func(text []string) DefaultToken {
-	return func(text []string) DefaultToken {
-		return DefaultToken{
-			tokenType: tokenType,
-			text:      text[0],
-			content:   "",
-			target:    "",
-		}
+func (t DefaultToken) Placeholder() string {
+	if t.id == -1 {
+		return t.content
 	}
-}
-func newLinkToken(text []string) DefaultToken {
-	target := text[1]
-	if target == "" {
-		target = text[2]
-	}
-	return DefaultToken{
-		tokenType: LinkToken,
-		text:      text[0],
-		content:   text[2],
-		target:    target,
-	}
+	str := fmt.Sprintf("$%-*s_", len(t.Content())-1, strconv.Itoa(t.id))
+	str = strings.ReplaceAll(str, " ", "_")
+	return str
 }
 
 type Parser struct {
+	idIncr int
 	text   string
 	regex  map[WikiTokenType]*regexp.Regexp
-	styles map[WikiTokenType]*lipgloss.Style
 	tokens []DefaultToken
 }
 
 func NewParser(text string, styles map[WikiTokenType]*lipgloss.Style) Parser {
 	p := Parser{
-		text:   text,
-		styles: styles,
+		text: text,
 		regex: map[WikiTokenType]*regexp.Regexp{
-			TitleToken:    regexp.MustCompile(`==+([a-zA-Z ]+)==+`),
-			LinkToken:     regexp.MustCompile(`\[{2}(?:([\w'\- \(\)#]+)\|)?([\w'\- \(\)]+)\]{2}`),
+			TitleToken:    regexp.MustCompile(`==+([a-zA-Z \-\':\(\)]+)==+`),
+			LinkToken:     regexp.MustCompile(`\[{2}(?:([\w'\+\- \(\):#]+)\|)?([\w'\- \+:\(\)]+)\]{2}`),
 			BoldToken:     regexp.MustCompile(`'''([a-zA-Z ]+)'''`),
 			FileToken:     regexp.MustCompile(`\(?\[{2}File:[a-zA-Z ]+\.[a-z]{3}(?:\|[a-zA-Z ]+)*\]{2}\)?`),
 			RedirectToken: regexp.MustCompile(`\{\{redirect\|[\w'\-\| \(\)]+\}\}`),
@@ -95,6 +76,46 @@ func NewParser(text string, styles map[WikiTokenType]*lipgloss.Style) Parser {
 	return p
 }
 
+func (p *Parser) newTokenForType(tokenType WikiTokenType) func(text []string) DefaultToken {
+	return func(text []string) DefaultToken {
+		id := p.idIncr
+		p.idIncr++
+		return DefaultToken{
+			tokenType: tokenType,
+			text:      text[0],
+			content:   text[1],
+			target:    "",
+			id:        id,
+		}
+	}
+}
+func (p *Parser) newHiddenTokenForType(tokenType WikiTokenType) func(text []string) DefaultToken {
+	return func(text []string) DefaultToken {
+		return DefaultToken{
+			tokenType: tokenType,
+			text:      text[0],
+			content:   "",
+			target:    "",
+			id:        -1,
+		}
+	}
+}
+func (p *Parser) newLinkToken(text []string) DefaultToken {
+	target := text[1]
+	if target == "" {
+		target = text[2]
+	}
+	id := p.idIncr
+	p.idIncr++
+	return DefaultToken{
+		tokenType: LinkToken,
+		text:      text[0],
+		content:   text[2],
+		target:    target,
+		id:        id,
+	}
+}
+
 func (p *Parser) matchesForRegex(reg *regexp.Regexp, text string, fn func(s []string) DefaultToken) []DefaultToken {
 	var tokens []DefaultToken = []DefaultToken{}
 	matches := reg.FindAllStringSubmatch(text, -1)
@@ -104,35 +125,52 @@ func (p *Parser) matchesForRegex(reg *regexp.Regexp, text string, fn func(s []st
 
 	return tokens
 }
+func (p *Parser) Tokens() []DefaultToken {
+	return p.tokens
+}
+func (p *Parser) TokenById(id int) *DefaultToken {
+	for _, token := range p.tokens {
+		if token.Id() == id {
+			return &token
+		}
+	}
+	return nil
+}
+func (p *Parser) TokenByPlaceholder(str string) *DefaultToken {
+	for _, token := range p.tokens {
+		if token.Placeholder() == str {
+			return &token
+		}
+	}
+	return nil
+}
+
 func (p *Parser) Parse() {
 	tokens := []DefaultToken{}
 	for tokenType, regex := range p.regex {
 		var fn func(s []string) DefaultToken
 		switch tokenType {
 		case LinkToken:
-			fn = newLinkToken
+			fn = p.newLinkToken
 		case FileToken, RedirectToken:
-			fn = newHiddenTokenForType(tokenType)
+			fn = p.newHiddenTokenForType(tokenType)
 		default:
-			fn = newTokenForType(tokenType)
+			fn = p.newTokenForType(tokenType)
 		}
-		newTokens := p.matchesForRegex(regex, p.text, fn)
-		tokens = append(tokens, newTokens...)
+
+		p.text = regex.ReplaceAllStringFunc(p.text, func(s string) string {
+			log.Info("Replace text", "match", s, "type", tokenType)
+			match := regex.FindAllStringSubmatch(s, -1)[0]
+			if match == nil {
+				return s
+			}
+			token := fn(match)
+			tokens = append(tokens, token)
+			return token.Placeholder()
+		})
 	}
 	p.tokens = tokens
 }
-func (p *Parser) Format() string {
-	text := p.text
-	for _, token := range p.tokens {
-		content := token.Content()
-		if p.styles[token.TokenType()] != nil {
-			content = p.styles[token.TokenType()].Render(content)
-		}
-		text = strings.ReplaceAll(
-			text,
-			token.Text(),
-			content,
-		)
-	}
-	return text
+func (p *Parser) Text() string {
+	return p.text
 }
