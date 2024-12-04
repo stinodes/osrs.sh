@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 
+	"osrs.sh/wiki/ssh/src/cmd"
 	"osrs.sh/wiki/ssh/src/style"
 	"osrs.sh/wiki/ssh/src/views/articlepane"
 	"osrs.sh/wiki/ssh/src/views/homepane"
@@ -155,9 +156,9 @@ func (m *Model) confirmSearch(query string) tea.Cmd {
 		return result
 	}
 }
-func (m *Model) fetchPage(pageId int) tea.Cmd {
+func (m *Model) fetchPage(msg cmd.OpenArticle) tea.Cmd {
 	return func() tea.Msg {
-		result, err := wiki.ParsePage(pageId)
+		result, err := wiki.ParsePage(msg)
 		if err != nil {
 			log.Error("Error fetching page", "err", err)
 			return nil
@@ -168,18 +169,23 @@ func (m *Model) fetchPage(pageId int) tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	keys := m.keys
-	var cmd tea.Cmd
+	var command tea.Cmd
 
 	if m.searchInput.Focused() {
-		m.searchInput, cmd = m.searchInput.Update(msg)
+		m.searchInput, command = m.searchInput.Update(msg)
 	}
 	if m.panes[m.currentPane] != nil {
-		m.panes[m.currentPane], cmd = m.panes[m.currentPane].Update(msg)
+		m.panes[m.currentPane], command = m.panes[m.currentPane].Update(msg)
 	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.resize(msg.Width, msg.Height), nil
+	case cmd.OpenArticle:
+		m.setPane(articlePane)
+		return m, tea.Batch(
+			m.fetchPage(msg),
+		)
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keys.Quit):
@@ -195,13 +201,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.confirmSearch(m.searchInput.Value()),
 				)
 			}
-			if m.currentPane == searchPane {
-				m.setPane(articlePane)
-				pane := m.panes[searchPane].(searchpane.Model)
-				return m, tea.Batch(
-					m.fetchPage(pane.SelectedResult()),
-				)
-			}
 		case key.Matches(msg, keys.Cancel):
 			m.showSearchBar = false
 			m.searchInput.Blur()
@@ -209,7 +208,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	}
 
-	return m, cmd
+	return m, command
 }
 
 func (m Model) View() string {

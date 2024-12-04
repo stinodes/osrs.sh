@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+	"osrs.sh/wiki/ssh/src/cmd"
 )
 
 type QueryResult struct {
@@ -55,7 +56,6 @@ func Search(query string) (*QueryResult, error) {
 
 	res, err := client.Get(searchUrl(query))
 	if err != nil {
-		log.Error("wiki", "err", err)
 		return nil, err
 	}
 
@@ -66,18 +66,20 @@ func Search(query string) (*QueryResult, error) {
 }
 
 // https://oldschool.runescape.wiki/api.php?action=parse&format=json&pageid=44134&prop=categories%7Csections%7Crevid%7Cdisplaytitle%7Ciwlinks%7Cproperties%7Cparsewarnings%7Cwikitext&formatversion=2
-func pageUrl(pageId int) string {
+func pageUrl(msg cmd.OpenArticle) string {
 	baseUrl := "https://oldschool.runescape.wiki/api.php?action=parse&format=json&prop=categories%7Csections%7Crevid%7Cdisplaytitle%7Ciwlinks%7Cproperties%7Cparsewarnings%7Cwikitext&formatversion=2"
-	searchParam := "pageid=" + strconv.Itoa(pageId)
+	var searchParam string
+	if msg.PageId != 0 {
+		searchParam = "pageid=" + strconv.Itoa(msg.PageId)
+	} else {
+		searchParam = "page=" + msg.Name
+	}
 	return baseUrl + "&" + searchParam
 }
-func ParsePage(pageId int) (*Page, error) {
-	log.Info("wiki", "page", pageId)
-
+func ParsePage(msg cmd.OpenArticle) (*Page, error) {
 	client := getHttpClient()
 
-	log.Info("wiki", "url", pageUrl(pageId))
-	res, err := client.Get(pageUrl(pageId))
+	res, err := client.Get(pageUrl(msg))
 	if err != nil {
 		log.Error("wiki", "err", err)
 		return nil, err

@@ -4,6 +4,8 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/log"
+	"osrs.sh/wiki/ssh/src/cmd"
 	"osrs.sh/wiki/ssh/src/style"
 	"osrs.sh/wiki/ssh/src/wiki"
 )
@@ -108,16 +110,21 @@ func (m *Model) setResults(results *wiki.QueryResult) {
 
 }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+	var command tea.Cmd
 	switch msg := msg.(type) {
 	case *wiki.QueryResult:
 		m.results = msg
 		m.setResults(msg)
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			return m, cmd.OpenArticleWithIdCmd(m.SelectedResult())
+		}
 	}
 
-	m.list, cmd = m.list.Update(msg)
+	m.list, command = m.list.Update(msg)
 
-	return m, cmd
+	return m, command
 }
 
 func (m Model) View() string {
