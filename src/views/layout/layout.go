@@ -95,7 +95,7 @@ func New(r *lipgloss.Renderer) Model {
 		currentPane: homePane,
 		panes:       map[contentPane]tea.Model{},
 	}
-	m.setPane(homePane)
+	m.setPane(homePane, false)
 
 	return m
 }
@@ -139,8 +139,8 @@ func (m *Model) initPane(pane contentPane) {
 		m.panes[pane] = homepane.New()
 	}
 }
-func (m *Model) setPane(pane contentPane) {
-	if m.panes[pane] == nil {
+func (m *Model) setPane(pane contentPane, forceNew bool) {
+	if m.panes[pane] == nil || forceNew {
 		m.initPane(pane)
 	}
 	m.currentPane = pane
@@ -158,11 +158,13 @@ func (m *Model) confirmSearch(query string) tea.Cmd {
 }
 func (m *Model) fetchPage(msg cmd.OpenArticle) tea.Cmd {
 	return func() tea.Msg {
+		log.Info("MSG", "msg", msg)
 		result, err := wiki.ParsePage(msg)
 		if err != nil {
 			log.Error("Error fetching page", "err", err)
 			return nil
 		}
+		log.Info("Fetched page", "page", result)
 		return result
 	}
 }
@@ -181,8 +183,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.resize(msg.Width, msg.Height), nil
+	case *wiki.Page:
+		m.setPane(articlePane, true)
+		pane := m.panes[articlePane].(articlepane.Model)
+		m.panes[articlePane] = pane.SetPage(msg)
+
 	case cmd.OpenArticle:
-		m.setPane(articlePane)
 		return m, tea.Batch(
 			m.fetchPage(msg),
 		)
@@ -195,7 +201,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchInput.Focus()
 		case key.Matches(msg, keys.Enter):
 			if m.searchInput.Focused() {
-				m.setPane(searchPane)
+				m.setPane(searchPane, true)
 				m.searchInput.Blur()
 				return m, tea.Batch(
 					m.confirmSearch(m.searchInput.Value()),

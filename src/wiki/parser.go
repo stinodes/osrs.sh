@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
 )
 
 type WikiTokenType int
@@ -96,7 +95,7 @@ func (p *Parser) newHiddenTokenForType(tokenType WikiTokenType) func(text []stri
 			text:      text[0],
 			content:   "",
 			target:    "",
-			id:        -1,
+			id:        -100,
 		}
 	}
 }
@@ -159,7 +158,6 @@ func (p *Parser) Parse() {
 		}
 
 		p.text = regex.ReplaceAllStringFunc(p.text, func(s string) string {
-			log.Info("Replace text", "match", s, "type", tokenType)
 			match := regex.FindAllStringSubmatch(s, -1)[0]
 			if match == nil {
 				return s

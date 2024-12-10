@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
+	"osrs.sh/wiki/ssh/src/cmd"
 	"osrs.sh/wiki/ssh/src/style"
 	"osrs.sh/wiki/ssh/src/utils"
 	"osrs.sh/wiki/ssh/src/wiki"
@@ -25,6 +26,7 @@ const (
 	Bottom   ActionInput = "G"
 	NextLink ActionInput = "l"
 	PrevLink ActionInput = "h"
+	Confirm  ActionInput = "enter"
 )
 
 type styles struct {
@@ -88,9 +90,8 @@ func New(renderer *lipgloss.Renderer, w int, h int) Model {
 			wiki.LinkToken:  &s.link,
 			wiki.BoldToken:  &s.bold,
 		},
-		page:   nil,
-		parser: wiki.Parser{},
-
+		page:          nil,
+		parser:        wiki.Parser{},
 		buffer:        []string{},
 		scrollPos:     0,
 		content:       "",
@@ -102,6 +103,19 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
+func (m Model) SetPage(page *wiki.Page) Model {
+	log.Info("SetPage", "page", page)
+	m.page = page
+	m.parser = wiki.NewParser(
+		page.WikiText,
+		map[wiki.WikiTokenType]*lipgloss.Style{
+			wiki.TitleToken: &m.styles.title,
+			wiki.BoldToken:  &m.styles.bold,
+			wiki.LinkToken:  &m.styles.link,
+		},
+	)
+	return m
+}
 func (m *Model) Resize(width, height int) {
 	m.width = width
 	m.height = height
@@ -140,10 +154,8 @@ func (m *Model) ScrollUp(delta int) {
 }
 func (m *Model) ScrollTo(line int) {
 	if line == 0 {
-		log.Info("ScrollTo", "line", m.contentLength()-m.height/2)
 		line = m.contentLength() - m.height/2
 	}
-	log.Info("ScrollTo", "line", m.constrainScrollPos(line))
 	m.scrollPos = m.constrainScrollPos(line)
 }
 func (m *Model) ScrollToTop(_ int) {
@@ -152,22 +164,72 @@ func (m *Model) ScrollToTop(_ int) {
 func (m *Model) ScrollToBottom(_ int) {
 	m.ScrollTo(m.contentLength() - m.height/2)
 }
+func (m *Model) ScrollToToken(token wiki.DefaultToken) {
+	line := m.lineFor(token.Placeholder())
+	if !m.isInView(token.Placeholder()) {
+		offset := -5
+
+		if line > m.scrollPos {
+			offset = -m.height - offset
+		}
+
+		m.ScrollTo(line + offset)
+	}
+}
+func (m *Model) SelectToken(token wiki.DefaultToken) {
+	m.selectedToken = token.Id()
+	m.ScrollToToken(token)
+}
 func (m *Model) NextLink(id int) {
-	cur := m.selectedToken
+	cur := m.parser.TokenById(m.selectedToken)
+	linkVisible := cur != nil && m.isInView(cur.Placeholder())
+
+	if !linkVisible {
+		viewableContent := m.viewableContent()
+		for i := 0; i < len(m.parser.Tokens()); i++ {
+			token := m.parser.TokenById(i)
+			if token != nil &&
+				token.TokenType() == wiki.LinkToken &&
+				strings.Contains(viewableContent, token.Placeholder()) {
+				m.SelectToken(*token)
+				break
+			}
+		}
+
+		return
+	}
+
 	tokens := m.parser.Tokens()
-	for i := cur + 1; i < len(m.parser.Tokens()); i++ {
+	for i := cur.Id() + 1; i < len(m.parser.Tokens()); i++ {
 		if tokens[i].TokenType() == wiki.LinkToken {
-			m.selectedToken = tokens[i].Id()
+			m.SelectToken(tokens[i])
 			break
 		}
 	}
 }
 func (m *Model) PrevLink(id int) {
-	cur := m.selectedToken
+	cur := m.parser.TokenById(m.selectedToken)
+	linkVisible := cur != nil && m.isInView(cur.Placeholder())
+
+	if !linkVisible {
+		viewableContent := m.viewableContent()
+		for i := len(m.parser.Tokens()) - 1; i >= 0; i-- {
+			token := m.parser.TokenById(i)
+			if token != nil &&
+				token.TokenType() == wiki.LinkToken &&
+				strings.Contains(viewableContent, token.Placeholder()) {
+				m.SelectToken(*token)
+				break
+			}
+		}
+
+		return
+	}
+
 	tokens := m.parser.Tokens()
-	for i := cur - 1; i >= 0; i++ {
+	for i := cur.Id() - 1; i >= 0; i++ {
 		if tokens[i].TokenType() == wiki.LinkToken {
-			m.selectedToken = tokens[i].Id()
+			m.SelectToken(tokens[i])
 			break
 		}
 	}
@@ -176,12 +238,14 @@ func (m *Model) PrevLink(id int) {
 func matches(input string, match ActionInput) bool {
 	return strings.HasPrefix(input, string(match))
 }
-func (m *Model) Push(input string) {
+func (m *Model) Push(input string) tea.Cmd {
 	m.buffer = append([]string{input}, m.buffer...)
 	bufferString := strings.Join(m.buffer, "")
 	cur := bufferString
 
 	var action func(n int)
+
+	log.Info("Push", "input", input, "buffer", m.buffer)
 
 	switch {
 	case matches(cur, Up):
@@ -196,6 +260,11 @@ func (m *Model) Push(input string) {
 		action = m.NextLink
 	case matches(cur, PrevLink):
 		action = m.PrevLink
+	case matches(cur, Confirm):
+		token := m.parser.TokenById(m.selectedToken)
+		if token != nil {
+			return cmd.OpenArticleWithNameCmd(token.Target())
+		}
 	}
 
 	if action != nil {
@@ -207,26 +276,17 @@ func (m *Model) Push(input string) {
 		}
 		action(num)
 		m.buffer = []string{}
-		log.Info("NewLink", "curLink", m.selectedToken)
 	}
+
+	return nil
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case *wiki.Page:
-		m.page = msg
-		m.parser = wiki.NewParser(
-			msg.WikiText,
-			map[wiki.WikiTokenType]*lipgloss.Style{
-				wiki.TitleToken: &m.styles.title,
-				wiki.BoldToken:  &m.styles.bold,
-				wiki.LinkToken:  &m.styles.link,
-			},
-		)
 	case tea.KeyMsg:
-		m.Push(msg.String())
+		cmd = m.Push(msg.String())
 	}
 
 	return m, cmd
@@ -241,11 +301,29 @@ func (m Model) lineCol() string {
 		MaxHeight(m.height).
 		Render(lines)
 }
+func (m Model) lineFor(text string) int {
+	before := strings.Split(
+		m.renderedContent(),
+		text,
+	)[0]
+
+	return len(strings.Split(before, "\n")) - 1
+}
+func (m Model) isInView(text string) bool {
+	return strings.Contains(m.viewableContent(), text)
+}
 func (m Model) viewableContent() string {
-	content := m.parser.Text()
 	lines := strings.Split(
-		m.styles.content.Render(content), "\n")
-	return strings.Join(lines[m.scrollPos:], "\n")
+		m.renderedContent(), "\n")
+	if len(lines) <= 1 {
+		return ""
+	}
+	start := m.scrollPos
+	end := m.constrainScrollPos(m.scrollPos + m.height)
+	return strings.Join(lines[start:end], "\n")
+}
+func (m Model) renderedContent() string {
+	return m.styles.content.Render(m.parser.Text())
 }
 
 func (m Model) View() string {
@@ -270,6 +348,6 @@ func (m Model) View() string {
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		m.lineCol(),
-		lipgloss.NewStyle().MaxHeight(m.height).Render(c),
+		lipgloss.NewStyle().Render(c),
 	)
 }

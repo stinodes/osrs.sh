@@ -4,7 +4,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
 	"osrs.sh/wiki/ssh/src/cmd"
 	"osrs.sh/wiki/ssh/src/style"
 	"osrs.sh/wiki/ssh/src/wiki"
